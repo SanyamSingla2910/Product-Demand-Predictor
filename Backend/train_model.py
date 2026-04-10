@@ -1,37 +1,54 @@
 import pandas as pd
 import joblib
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
+from sklearn.neural_network import MLPRegressor
 from xgboost import XGBRegressor
-from sklearn.metrics import r2_score
+from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 
-df = pd.read_csv("backend/dataset.csv")
+df = pd.read_csv("dataset.csv")
 
-le = LabelEncoder()
-df["season"] = le.fit_transform(df["season"])
+df["season"] = df["season"].str.lower()
+df["product_category"] = df["product_category"].str.lower()
 
-X = df[["price", "marketing", "season"]]
+X = df[["product_category", "price", "marketing", "competitor_price", "economic_index", "season"]]
 y = df["demand"]
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-rf = RandomForestRegressor(n_estimators=200)
-gb = GradientBoostingRegressor(n_estimators=200)
-xgb = XGBRegressor(n_estimators=200)
+numeric_features = ["price", "marketing", "competitor_price", "economic_index"]
+categorical_features = ["product_category", "season"]
 
-model = VotingRegressor([
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', StandardScaler(), numeric_features),
+        ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+    ],
+    remainder='passthrough'
+)
+
+rf = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10, n_jobs=-1)
+gb = GradientBoostingRegressor(n_estimators=100, random_state=42, learning_rate=0.1)
+xgb = XGBRegressor(n_estimators=100, random_state=42, learning_rate=0.1, n_jobs=-1)
+mlp = MLPRegressor(hidden_layer_sizes=(128, 64), activation='relu', solver='adam', max_iter=500, random_state=42)
+
+voting_reg = VotingRegressor([
     ("rf", rf),
     ("gb", gb),
-    ("xgb", xgb)
+    ("xgb", xgb),
+    ("nn", mlp)
 ])
 
-model.fit(X_train, y_train)
+model_pipeline = Pipeline(steps=[
+    ('preprocessor', preprocessor),
+    ('regressor', voting_reg)
+])
 
-y_pred = model.predict(X_test)
+model_pipeline.fit(X_train, y_train)
 
-print("Accuracy (R2 Score):", r2_score(y_test, y_pred))
+y_pred = model_pipeline.predict(X_test)
 
-joblib.dump(model, "model.pkl")
-
-print("Initial model trained successfully")
+joblib.dump(model_pipeline, "model.pkl")
